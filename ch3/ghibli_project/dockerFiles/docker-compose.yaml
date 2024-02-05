@@ -1,0 +1,33 @@
+version: "3.1"
+
+services:
+  web:
+    build:
+      context: "../"
+      dockerfile: "dockerFiles/web/dockerFile.dev"
+    ports:
+      - 3000:3000
+    volumes:
+      - ../web/:/usr/src/app
+  backend:
+    build:
+      context: "../"
+      dockerfile: "dockerFiles/backend/dockerFile.dev"
+    ports:
+      - 8000:8000
+    volumes:
+      - ../backend/:/usr/src/app
+  db:
+    image: mariadb
+    container_name: mariadb
+    restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+    ports:
+      - 3306:3306
+  redis:
+    image: redis
+    container_name: redis
+    restart: always
+    ports:
+      - 6379:6379

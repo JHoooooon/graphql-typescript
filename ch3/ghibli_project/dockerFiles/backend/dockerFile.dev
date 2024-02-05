@@ -1,0 +1,11 @@
+FROM node:alpine
+
+WORKDIR /usr/src/app
+
+COPY ./backend/package*.json ./
+
+RUN npm ci;
+
+COPY ./backend ./
+
+CMD ["npm", "run", "start:dev"]

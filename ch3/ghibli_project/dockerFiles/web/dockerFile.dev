@@ -1,0 +1,11 @@
+FROM node:alpine
+
+WORKDIR /usr/src/app
+
+COPY ./web/package*.json ./
+
+RUN npm ci;
+
+COPY ./web ./
+
+CMD ["npm", "start"]
