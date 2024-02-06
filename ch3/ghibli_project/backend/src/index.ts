@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
 import { buildSchema } from 'type-graphql';
+import cors from 'cors';
 import app from './app';
 import { FilmResolver } from './resolver/Film';
 
@@ -16,7 +17,13 @@ async function bootStrap() {
   try {
     await server.start();
 
-    app.use('/graphql', expressMiddleware(server));
+    app.use(
+      '/graphql',
+      cors({
+        origin: '*',
+      }),
+      expressMiddleware(server),
+    );
     app.listen(app.get('PORT'), () => {
       if (process.env.NODE_ENV !== 'production') {
         console.log(`
