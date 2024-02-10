@@ -3054,9 +3054,12 @@ const cache = new InMemoryCache({
 이제, 이를 해결하기위해 `PolicyType` 을 구현한다
 
 ```ts
-import { FieldMergeFunction, FieldReadFunction } from '@apollo/client';
-import { PagenatedFilms } from '../../generated/graphql';
-import { KeyArgsFunction, KeySpecifier } from '@apollo/client/cache/inmemory/policies';
+import { FieldMergeFunction, FieldReadFunction } from "@apollo/client";
+import { PagenatedFilms } from "../../generated/graphql";
+import {
+  KeyArgsFunction,
+  KeySpecifier,
+} from "@apollo/client/cache/inmemory/policies";
 
 // FieldPolicyObj 인터페이스는 FieldMergeFunction 과 FieldReadFunction
 // 타입을 가진 객체이다
@@ -3067,17 +3070,21 @@ interface FieldPolicyObj {
 }
 
 // PagenatedFilms 타입을 제네릭으로 받는 함수
-export const filmsPagenatedFieldPolicy = <T extends PagenatedFilms>(): FieldPolicyObj => {
+export const filmsPagenatedFieldPolicy = <
+  T extends PagenatedFilms
+>(): FieldPolicyObj => {
   return {
     // 페이지 네이션은
     // 특정 필드로 따로 캐시되어 저장될 필요가 없다
     keyArgs: false,
     // TypePolicy 에서 사용할 merge 함수
     merge(existing: T | undefined, incoming: T) {
-      console.log(existing, incoming)
+      console.log(existing, incoming);
       return {
         cursor: incoming.cursor, // 다음 cursor
-        films: existing ? [...existing.films, ...incoming.films] : incoming.films, // films 배열
+        films: existing
+          ? [...existing.films, ...incoming.films]
+          : incoming.films, // films 배열
       };
     },
   };
@@ -3089,23 +3096,23 @@ export const filmsPagenatedFieldPolicy = <T extends PagenatedFilms>(): FieldPoli
 `./ghibli_project/web/src/App.tsx`
 
 ```tsx
-import { ChakraProvider, Box, Text, theme } from '@chakra-ui/react';
-import { ApolloClient, ApolloProvider, InMemoryCache } from '@apollo/client';
-import FilmList from './components/film/FilmList';
-import { filmsPagenatedFieldPolicy } from './common/apollo/FieldPolicy'
+import { ChakraProvider, Box, Text, theme } from "@chakra-ui/react";
+import { ApolloClient, ApolloProvider, InMemoryCache } from "@apollo/client";
+import FilmList from "./components/film/FilmList";
+import { filmsPagenatedFieldPolicy } from "./common/apollo/FieldPolicy";
 
 const apolloClient = new ApolloClient({
   // graphql server uri
-  uri: 'http://127.0.0.1:8000/graphql',
+  uri: "http://127.0.0.1:8000/graphql",
   // apollo client 캐시를 메모리에 캐시
   cache: new InMemoryCache({
     typePolicies: {
       Query: {
         fields: {
           films: filmsPagenatedFieldPolicy(),
-        }
-      }
-    }
+        },
+      },
+    },
   }),
 });
 
@@ -3126,14 +3133,14 @@ export const App = () => (
 `ghibli_project/web/src/components/film/FilmList.tsx`
 
 ```tsx
-import { Box, SimpleGrid, Skeleton } from '@chakra-ui/react';
-import useFilmsQuery from '../../hooks/queries/useFilmsQuery';
-import FilmCard from './FilmCard';
-import Scroller from '../common/scroller';
-import { useCallback } from 'react';
+import { Box, SimpleGrid, Skeleton } from "@chakra-ui/react";
+import useFilmsQuery from "../../hooks/queries/useFilmsQuery";
+import FilmCard from "./FilmCard";
+import Scroller from "../common/scroller";
+import { useCallback } from "react";
 
 export default function FilmList() {
-  // 패칭할 데이터 LIMIT 
+  // 패칭할 데이터 LIMIT
   const LIMIT = 6;
   // films 쿼리
   const { data, loading, error, fetchMore } = useFilmsQuery({
@@ -3141,7 +3148,7 @@ export default function FilmList() {
     limit: LIMIT,
   });
 
-  // Scroller 의 onEnter 함수 
+  // Scroller 의 onEnter 함수
   const onEnter = useCallback(() => {
     if (data) {
       // fetchMore 실행
@@ -3158,9 +3165,16 @@ export default function FilmList() {
   if (error) return <p>{error.message}</p>;
 
   return (
-    <Scroller onEnter={onEnter} isLoading={loading} lastCursor={data?.films.cursor}>
+    <Scroller
+      onEnter={onEnter}
+      isLoading={loading}
+      lastCursor={data?.films.cursor}
+    >
       <SimpleGrid columns={[2, null, 3]} spacing={[2, null, 10]}>
-        {loading && new Array(LIMIT).fill(0).map((x) => <Skeleton key={x} height="400px" />)}
+        {loading &&
+          new Array(LIMIT)
+            .fill(0)
+            .map((x) => <Skeleton key={x} height="400px" />)}
         {!loading &&
           data &&
           data.films.films.map((film) => (
@@ -3172,7 +3186,6 @@ export default function FilmList() {
     </Scroller>
   );
 }
-
 ```
 
 제대로 `Scroller` 가 작동하는것을 볼 수 있다.
@@ -3193,16 +3206,15 @@ export default function FilmList() {
 좋지 못하다
 
 > 클라이언트에서는 서버에서 많은 양의 사진을 불러와서 렌더링해야 하므로 좋지 못하고,
-서버 입장에서는 사용자에게 보여주지 않아도되는 사진을 보내야 하므로, 퍼포먼스상 좋지않다
+> 서버 입장에서는 사용자에게 보여주지 않아도되는 사진을 보내야 하므로, 퍼포먼스상 좋지않다
 
 간단한 `LazyLoader` 를 구현해본다
 
 `ghibli_project/web/src/components/common/LazyLoader.tsx
 
 ```tsx
-
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Skeleton from './Skeleton/Skeleton';
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import Skeleton from "./Skeleton/Skeleton";
 
 interface LazyLoaderProps {
   children: React.ReactElement;
@@ -3231,13 +3243,13 @@ const LazyLoader = ({ children, height, loading }: LazyLoaderProps) => {
         }
       });
     },
-    [setInView],
+    [setInView]
   );
 
   useEffect(() => {
     // ioRef 할당
     ioRef.current = new IntersectionObserver(lazyLoading, {
-      threshold: 0
+      threshold: 0,
     });
     // ioPlaceholderRef 가 있다면
     if (ioPlaceholderRef.current) {
@@ -3263,12 +3275,22 @@ const LazyLoader = ({ children, height, loading }: LazyLoaderProps) => {
       {inView && !loading ? (
         children
       ) : (
-        <Skeleton ref={ioPlaceholderRef} animationEffect={true} height={height} rounded={40} />
+        <Skeleton
+          ref={ioPlaceholderRef}
+          animationEffect={true}
+          height={height}
+          rounded={40}
+        />
       )}
     </>
   );
 };
 
 export default LazyLoader;
-
 ```
+
+다음처럼 `LazyLoader` 를 생성한다
+
+💢 이 로직은 그렇게 어렵지 않지만, 몇가지 문제가 발생한다
+
+<!-- 1. 처음 `image` 로딩시,  -->
