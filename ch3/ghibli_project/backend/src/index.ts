@@ -5,10 +5,11 @@ import { buildSchema } from 'type-graphql';
 import cors from 'cors';
 import app from './app';
 import { FilmResolver } from './resolver/Film';
+import { CutResolver } from './resolver/Cut';
 
 async function bootStrap() {
   const schema = await buildSchema({
-    resolvers: [FilmResolver],
+    resolvers: [FilmResolver, CutResolver],
   });
   const server = new ApolloServer({
     schema,

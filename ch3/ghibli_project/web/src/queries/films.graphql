@@ -1,4 +1,4 @@
-query Films($limit: Int, $cursor: Int) {
+query films($limit: Int, $cursor: Int) {
   films(limit: $limit, cursor: $cursor) {
     cursor
     films {

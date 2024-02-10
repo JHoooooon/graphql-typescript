@@ -1,5 +1,16 @@
-import { AspectRatio, Box, Heading, Image, LinkBox, Stack, Text, useColorModeValue } from '@chakra-ui/react';
+import {
+  AspectRatio,
+  Box,
+  Heading,
+  Image,
+  LinkBox,
+  LinkOverlay,
+  Stack,
+  Text,
+  useColorModeValue,
+} from '@chakra-ui/react';
 import { Film } from '../../generated/graphql';
+import { Link } from 'react-router-dom';
 
 interface FilmCardProps {
   film: Film;
@@ -14,9 +25,11 @@ const FilmCard = ({ film }: FilmCardProps) => {
         </AspectRatio>
       </Box>
       <Stack mt={2}>
-        <Heading color={useColorModeValue('gray.700', 'white')} fontSize={'xl'} fontFamily={'body'}>
-          {film.title}
-        </Heading>
+        <LinkOverlay as={Link} to={`/film/${film.id}`}>
+          <Heading color={useColorModeValue('gray.700', 'white')} fontSize={'xl'} fontFamily={'body'}>
+            {film.title}
+          </Heading>
+        </LinkOverlay>
         <Text fontSize="sm" color="gray.500" isTruncated>
           {film.subtitle ? film.subtitle : <>&nbsp;</>}
         </Text>

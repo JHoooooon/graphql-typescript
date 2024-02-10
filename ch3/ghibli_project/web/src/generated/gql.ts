@@ -13,7 +13,9 @@ import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/
  * Therefore it is highly recommended to use the babel or swc plugin for production.
  */
 const documents = {
-    "query Films($limit: Int, $cursor: Int) {\n  films(limit: $limit, cursor: $cursor) {\n    cursor\n    films {\n      id\n      title\n      subtitle\n      runningTime\n      director_id\n      release\n      director {\n        id\n        name\n      }\n      posterImg\n      description\n      genre\n    }\n  }\n}": types.FilmsDocument,
+    "query cuts($filmId: Int!) {\n  cuts(filmId: $filmId) {\n    id\n    src\n  }\n}": types.CutsDocument,
+    "query film($filmId: Int!) {\n  film(filmId: $filmId) {\n    id\n    title\n    subtitle\n    description\n    genre\n    runningTime\n    posterImg\n    release\n    director {\n      id\n      name\n    }\n  }\n}": types.FilmDocument,
+    "query films($limit: Int, $cursor: Int) {\n  films(limit: $limit, cursor: $cursor) {\n    cursor\n    films {\n      id\n      title\n      subtitle\n      runningTime\n      director_id\n      release\n      director {\n        id\n        name\n      }\n      posterImg\n      description\n      genre\n    }\n  }\n}": types.FilmsDocument,
 };
 
 /**
@@ -33,7 +35,15 @@ export function gql(source: string): unknown;
 /**
  * The gql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function gql(source: "query Films($limit: Int, $cursor: Int) {\n  films(limit: $limit, cursor: $cursor) {\n    cursor\n    films {\n      id\n      title\n      subtitle\n      runningTime\n      director_id\n      release\n      director {\n        id\n        name\n      }\n      posterImg\n      description\n      genre\n    }\n  }\n}"): (typeof documents)["query Films($limit: Int, $cursor: Int) {\n  films(limit: $limit, cursor: $cursor) {\n    cursor\n    films {\n      id\n      title\n      subtitle\n      runningTime\n      director_id\n      release\n      director {\n        id\n        name\n      }\n      posterImg\n      description\n      genre\n    }\n  }\n}"];
+export function gql(source: "query cuts($filmId: Int!) {\n  cuts(filmId: $filmId) {\n    id\n    src\n  }\n}"): (typeof documents)["query cuts($filmId: Int!) {\n  cuts(filmId: $filmId) {\n    id\n    src\n  }\n}"];
+/**
+ * The gql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function gql(source: "query film($filmId: Int!) {\n  film(filmId: $filmId) {\n    id\n    title\n    subtitle\n    description\n    genre\n    runningTime\n    posterImg\n    release\n    director {\n      id\n      name\n    }\n  }\n}"): (typeof documents)["query film($filmId: Int!) {\n  film(filmId: $filmId) {\n    id\n    title\n    subtitle\n    description\n    genre\n    runningTime\n    posterImg\n    release\n    director {\n      id\n      name\n    }\n  }\n}"];
+/**
+ * The gql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function gql(source: "query films($limit: Int, $cursor: Int) {\n  films(limit: $limit, cursor: $cursor) {\n    cursor\n    films {\n      id\n      title\n      subtitle\n      runningTime\n      director_id\n      release\n      director {\n        id\n        name\n      }\n      posterImg\n      description\n      genre\n    }\n  }\n}"): (typeof documents)["query films($limit: Int, $cursor: Int) {\n  films(limit: $limit, cursor: $cursor) {\n    cursor\n    films {\n      id\n      title\n      subtitle\n      runningTime\n      director_id\n      release\n      director {\n        id\n        name\n      }\n      posterImg\n      description\n      genre\n    }\n  }\n}"];
 
 export function gql(source: string) {
   return (documents as any)[source] ?? {};

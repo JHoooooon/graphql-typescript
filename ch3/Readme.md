@@ -1581,51 +1581,70 @@ normalization
 이를 `Scroller.tsx` 를 통해 구현한다.
 
 ```tsx
-import React, { Children, useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { FilmsQuery } from "../../generated/graphql";
+import { Box } from "@chakra-ui/react";
 
 interface ScrollerProps {
+  // 스크롤러를 적용할 children
   children: React.ReactElement;
+  // intersectionObjserver 의 callback 에서 실행할
+  // 함수
   onEnter: () => void;
+  // 다음에 query 할 cursor
   lastCursor: FilmsQuery["films"]["cursor"];
+  // data 를 loading 중인지 확인
+  isLoading: boolean;
 }
 
-const Scroller = ({ children, onEnter, lastCursor }: ScrollerProps) => {
-  // children 에 대한 ref
-  const containerRef = useRef<Element>(null);
-
-  // Children 은 오직 하나이어야 하며, ref 를 연결하기 위해 cloneElement 사용
-  // 하여 ref 를 연결한 클론 엘리먼트 생성
-  const Elem = React.cloneElement(Children.only(children), {
-    ref: containerRef,
-  });
+const Scroller = ({
+  children,
+  onEnter,
+  isLoading,
+  lastCursor,
+}: ScrollerProps) => {
+  // intersectionObserver 의 target ref
+  const target = useRef<HTMLDivElement>(null);
 
   // intersection observer callback 함수
   const scrollerAction: IntersectionObserverCallback = useCallback(
-    (entries, observer) => {
+    (entries) => {
       entries.forEach((entity) => {
-        if (entity.isIntersecting) {
-          console.log("intersection");
+        // intersecting 되고 lastCursor 가 있다면
+        // onEnter 실행
+        if (entity.isIntersecting && lastCursor) {
           onEnter();
         }
       });
     },
-    [onEnter]
+    [onEnter, lastCursor]
   );
 
   useEffect(() => {
-    // containerRef.currnet 가 있다면, observer 생성
-    if (containerRef.current) {
-      const observer = new IntersectionObserver(scrollerAction, {
-        threshold: 0.9, // threshold 가 90% 이면 scrollerAction 실행
-      });
-      // observe 로 target 등록
-      observer.observe(containerRef.current);
+    // threshold: 0.8 일때 scrollerAction 실행
+    const observer = new IntersectionObserver(scrollerAction, {
+      threshold: 0.8,
+    });
+    // target.current
+    if (target.current) {
+      // loading 중이라면 unobserve
+      // data 를 받아오는중에 작동을 방지
+      if (isLoading) {
+        observer.unobserve(target.current);
+      } else {
+        // loading 이 완료되면 observe 실행
+        observer.observe(target.current);
+      }
     }
-  }, [containerRef, scrollerAction]);
+    return () => observer.disconnect();
+  }, [target, scrollerAction, isLoading]);
   return (
-    // 클론 엘리먼트 사용
-    <div>{Elem}</div>
+    <>
+      {/* children */}
+      <div>{children}</div>
+      {/* lastCursor 가 있다면, intersectionObserver target 활성화 */}
+      {lastCursor && <Box ref={target} h={100} w={"100%"}></Box>}
+    </>
   );
 };
 
@@ -1868,7 +1887,1388 @@ export default Scroller;
 > ⚠️ 만약, `cache ID` 생성에 실패한다면, `normalize` 되지 않으며 참조값도
 > 없다. 대신에 원래 객체를 할당한다
 
-<!-- markdownlint-desable-->
+<!-- markdownlint-disable MD029 -->
 
-4. a
-<!-- markdownlint-restore-->
+4. 📥 **Store nomalized obejcts**
+   마지막으로 만들어진 `objects` 들은 `cache` 의 `flat lookup table` 에
+   모두 저장된다</br> 하지만 다음과 같은 경우가 발생할 수 있다<br/>
+   :paperclip: **Deep Merge**
+   들어오는 객체가 존재하는 캐시 객체와`ID` 가 같을때, 해당 객체의 필드는 병합된다<br/>
+   📎 **Overwirte**
+   만약 들어오는 객체의 필드가 기존의 객체의 필드를 공유한다면, 들어오는
+   객체의 필드로 덮어씌어진다<br/>
+   📎 **Preservation of field**
+   기존의 객체에만 필드가 있거나, 들어오는 객체에만 있는 필드가 있다면
+   그 필드는 보존한다
+
+#### :keyboard: Configurating the Apollo Client cache
+
+> [Configurating the Apollo Client cache](https://www.apollographql.com/docs/react/caching/cache-configuration) 의 내용을 정리한다
+
+`cache setup` 과 `configuration` 에 대해서 서술한다
+이는 어떻게 `cache` 된 데이터와 상호작용하는지 배울수 있다.
+
+`InMemoryCache` 객체를 생성하는 코드는 다음과 같다
+
+```ts
+
+cont { InMemoryCache, ApolloClient } from '@apllo/client';
+
+const client = new ApolloClient({
+  //...other options
+  cache: new InMemoryCache(options)
+})
+
+```
+
+여기에서 제공되는 `options` 를 살펴본다
+
+##### ✏️ Configuration options
+
+`chche` 설정은 좀더 어플리케이션에 잘 맞도록 `cache` 조작을 해준다
+이는 다음과 같은 상황에 사용된다.
+<br/>
+
+- 특정 유형의 `cacheID` 포멧을 사용자 정의
+  <br/>
+
+- 개별 `fields` 의 검색 및 저장 사용자 정의
+  <br/>
+
+- `Fragment matching` 에 대한 다형성 관계 타입 저의
+  <br/>
+
+- 클라이언트 쪽 `local state` 관리
+  <br/>
+
+이는 다음과 같은 설정옵션이 존재한다.
+
+| name / type                         | description                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| :---------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **addTypename**<br/>`Boolean`       | 만약 `true` 라면, 캐시는 나가는 모든 객체에 대해<br/>자동적으로 `_typeaname` 필드를 요청한다<br/>이 말은, 작업 정의로 부터 `__typename` 을 생략할수 있다는 의미이기도 하다.<br/><br/>기본값으로 `cache` 는 모든 캐시된 객체에서 `cache ID` 의 한부분으로써<br/> `__typename` 필드를 사용한다. 그래서 이 필드를 항상 가져오는것이 도움이 된다.<br/><br/>`default` 값으로 `true`                                                                                   |
+| **resultCaching**<br/>`Boolean`     | 만약 `true` 라면, `data` 가 변경되지 않는한, <br/> 동일한 `query` 는 항상 같은(`===`) 객체로 응답한다<br/>이는 `query` 결과가 변경되었는지 확인하는데 도움이 된다<br/><br/>`default` 값으로 `true`                                                                                                                                                                                                                                                               |
+| **resultCachMaxSize**<br/>`number`  | 객체의 개수 제한옵션이며, 이 옵션은 캐시에 대한 반복된 읽기의 속도를 높이기 위해 메모리에 유지된다 <br/><br/>`default` 값으로 `Math.pow(2, 16)`                                                                                                                                                                                                                                                                                                                  |
+| **passibleTypes**<br/>`Object`      | 이 객체는 `schema` 타입 사이의 다형성 관계를 정의한다.<br/>그래서 `union` 또는 `interface` 로 캐시된 데이터를 찾을수 있다<br/><br/>이 객체의 각 `key` 는 `union` 또는 `interface` 의 `__typename` 이고<br/> `value` 는 구현된 `interface` 혹은 `union` 에 속한 타입들의 `__typename` 들의 배열이다 <br/><br/> 예시는 [Defining possibleTypes manually.](https://www.apollographql.com/docs/react/data/fragments/#defining-possibletypes-manually) 에서 볼수있다. |
+| **typePolices**<br/>`Object`        | `Type` 별 캐시 동작을 사용자정의하는 객체이다<br/><br/>각 `Key` 는 사용자정의를 위한 `type` 의 `__typename` 이며, `Value` 는 `TypePolicy` 객체에 대응된다 <br/><br/> [TypePolicy object](https://www.apollographql.com/docs/react/caching/cache-configuration/#typepolicy-fields) 를 살펴보자.                                                                                                                                                                   |
+| **dataIdFromObject**<br/>`Function` | 이 함수는 응답 객체를 인자로 가지며, 저장소안에 `data` 가 `normalize` 될때 사용될 고유한 식별자를 리턴한다 <br/><br/>자세한건 [Customizing identifier generation globally](https://www.apollographql.com/docs/react/caching/cache-configuration) 을 보도록 하자                                                                                                                                                                                                  |
+
+> 현재 책에서 사용하는 방식으로 `typePolices` 를 설정하고 있다
+> 이부분에 대해서 추가로 정리한다
+
+###### TypePolicy Fields
+
+캐시가 `Schema` 에 지정된 타입과 상호작용을 하기 위해서
+`InMemoryCache` 생성자 객체에 `__typename` 문자열이 매핑된 `TypePolicy` 객체를 전달할수 있다
+
+`TypePolicy` 객체는 다음의 필드를 포함한다
+
+```ts
+type TypePolicy = {
+  // 다음중 하나로 이 타입의 고유 키 정의를 허용한다
+  //
+  // - 필드이름의 배열(KeySpecifier),
+  // - 임의의 문자열을 반환하는 함수(KeyFieldsFunction)
+  // - false: false 는 이 타입의 객체를 위해
+  //   `normalization` 을 비활성화한다
+  keyFields?: KeySpecifier | KeyFieldsFunction | false;
+
+  // 만약 스키마가 `Root Query`, `Mutation`, `Subscription`
+  // 타입들에서 어떠한 사용자 정의 __typename 을 사용한다면
+  // 아래의 `field` 에 `true` 로 설정한다
+  // 이는 이유형이 사용자 정의 유형으로 사용됨을 가리킨다
+  queryType?: true; // Root Query
+  mutationType?: true; // Mutation
+  subscriptionType?: true; // Subscription
+
+  fields?: {
+    [fieldName: string]:
+      | FieldPolicy<StoreValue>
+      | FieldReadFunction<StoreValue>;
+  };
+};
+
+// Typescriot 3.7 에서 사용된 재귀 타입 별칭이 사용된다
+// 실제 유형이지만 다음처럼 사용한다
+type KeySpecifier = (string | KeySpecifier)[];
+
+type KeyFieldsFunction = (
+  object: Readonly<StoreObject>,
+  context: {
+    typename: string;
+    selectionSet?: SelectionSetNode;
+    fragmentMap?: FragmentMap;
+  }
+) => string | null | void;
+```
+
+자!! 이제 타입에 대해서 살짝 맛보았다.
+그럼 어떻게 `Customizing` 하는지 보도록 한다
+
+###### 🧰 Customizing the behavior of chaced fields
+
+각 `field` 를 커스터마이즈 할수 있는 `cache` 는 쓰고 읽을수 있다
+이를 위해서, `field` 를 위한 `field policy` 를 정의한다.
+
+`field policy` 는 다음을 포함한다
+
+- **`read` 함수**
+  `field` 들에 캐시된 값을 읽을때 발생하는 작업을 지정하는 함수
+  <br/>
+
+- **`merge` 함수**
+  `field` 들에 캐시된 값을 쓰기할때 발생하는 작업을 지정하는 함수
+  <br/>
+
+- **`key arguments` 의 배열**
+  캐시에 불필요한 중복되는 데이터 저장을 방지하기위해 도움을 주는 배열
+  <br/>
+
+각 `field` 정책은 `parent type` 필드에 해당하는 `TypePolicy Object` 내부에
+정의된다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Person: {
+      fields: {
+        name: {
+          read(name) {
+            // Return the cached name, transformed to upper case
+            return name.toUpperCase();
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+이 `field policy` 는 `reac function` 이 지정되었으며, `Person.name` 이
+쿼리될때마다 캐시가 리턴한다.
+
+**_The read function_**
+
+`field` 에 `read` 함수가 정의되었다면, `Client` 에서 이 `field` 를
+쿼리할때마다 `cache` 는 이 함수를 호출한다
+
+`query` 응답에서, 캐시된 필드 값 대신에 이 `field` 에 `read` 함수에서  
+리턴한 값으로 채워진다
+
+모든 `read` 함수는 두개의 인자를 전달한다
+
+- **첫번째 인자는 필드에 현재 캐시된 값**이다.(만약 하나만 존재한다면,)
+  이는 계산된 값을 리턴하는데 도움을 주기 위해 사용된다
+
+```ts
+existing: Readonly<TExisting> | undefined,
+```
+
+- 두번째 인자는 객체이며, **필드로 전달된 인자를 포함하며, `helper` 함수 그리고 각 프로퍼티에 접근을 제공하기 위한 객체** 이다.
+
+```ts
+interface FieldFunctionOptions {
+  // 인메모리 캐시
+  cache: InMemoryCache;
+
+  // 변수 적용이후 필드에 전달된 최종 arguments 값,
+  // 만약 제공된 `arguments` 가 없다면 이 프로퍼티는 null 이다
+  args: Record<string, any> | null;
+
+  // 필드의 네임이다. `options.field` 가 존재한다면
+  // `options.field.name.vlaue` 와 같다
+  // 이는 여러 `fields` 에서 같은 함수 재사용을 원하거나,
+  // 현재 진행중인 `field` 를 알고싶을때 유용하다
+  // options.field 가 null 이더라도 항상 string 타입이다
+  fieldName: string;
+
+  // 이 `field` 를 읽기위해 사용되는 `FieldNode` 객체이다
+  // 만약 `field` 의 다른`attributes` 에 대해서 알고 싶을때 유용하다.
+  // 이 옵션은 `options.readField` 에 `string` 이 전달될때 `null` 이다
+  field: FieldNode | null;
+
+  // 이 필드에 있는 쿼리를 읽을때 제공되는 변수들이다
+  // 만약 변수들이 제공되지 않는다면, `undefined` 일수 있다
+  variables?: Record<string, any>;
+
+  // 쉽게 {__ref: string} 참조 객체를 감지한다
+  isReference(obj: any): obj is Reference;
+
+  // Returns a Reference object if obj can be identified, which requires,
+  // at minimum, a __typename and any necessary key fields. If true is
+  // passed for the optional mergeIntoStore argument, the object's fields
+  // will also be persisted into the cache, which can be useful to ensure
+  // the Reference actually refers to data stored in the cache. If you
+  // pass an ID string, toReference will make a Reference out of it. If
+  // you pass a Reference, toReference will return it as-is.
+  //
+  // 이 helper 함수는 ref 를 생성하거나, 정규화하는데 사용된다
+  // - objOrIdOrRef: 캐시 참조로 변환하거나 정규화하려는 객체, ID, 또는
+  //                 참조이다.
+  //                 - `StoreObject: 캐시에 저장된 정규화된 객체
+  //                   `__typename`: 과 식별자(id) 가 있어야 한다
+  //                 - string: 고유 식별자(id)
+  //                 - Reference: 기존 캐시 참조
+  // - mergeIntoStore?: `ture` 로 설정하면 `cache` 에 병합하는지 여부를 나타낸다
+  //                    `mergeIntoStore` 가 `false` 이거나 제공되지 않으면
+  //                    참조가 캐시에 자동으로 추가되지 않는다.
+  //
+  // // Example object representing a User in the cache
+  // const objectInCache = {
+  //   __typename: 'User',
+  //   id: '123',
+  //   name: 'John Doe',
+  // };
+
+  // // Convert the object to a cache reference
+  // const reference = toReference(objectInCache);
+
+  // // Alternatively, you can create a reference from an ID
+  // const idReference = toReference('123');
+
+  // // Output values:
+  // // reference: { __ref: 'User:123' }
+  // // idReference: { __ref: '123' }
+  //
+  toReference(
+    objOrIdOrRef: StoreObject | string | Reference,
+    mergeIntoStore?: boolean
+  ): Reference | undefined;
+
+  // Helper function for reading other fields within the current object.
+  // If a foreign object or reference is provided, the field will be read
+  // from that object instead of the current object, so this function can
+  // be used (together with isReference) to examine the cache outside the
+  // current object. If a FieldNode is passed instead of a string, and
+  // that FieldNode has arguments, the same options.variables will be used
+  // to compute the argument values. Note that this function will invoke
+  // custom read functions for other fields, if defined. Always returns
+  // immutable data (enforced with Object.freeze in development).
+  //
+  // 현재 객체안에 다른 `fields` 를 읽기위한 핼퍼함수이다
+  // 만약 제공된 참고 또는 외부 객체가 있다면(foreignObjOrRef),
+  // 이 필드는 현재 객체 대신에 제공된 객체의 필드를 읽을것이다.
+  //
+  // 외부 객체 일경우이 함수는 캐시에 저장된 객체인지 검사하기 위해
+  // `isReference` 와 함께 사용될수 있다
+  // `isReference` 는 `{ __ref: string }` 을 가졌는지 확인하는
+  // 헬퍼함수이다
+  //
+  // nameOrField 에 `string` 대신 `FieldNode` 가 전달되었고
+  // `FieldNode` 에 인자를 가졌다면, 이는 `options.variables` 에서
+  // 계산된 `arguement` 값들을 사용한것과 같다
+  // (이부분은 options 관련 문서를 살펴봐야 겠다...)
+  //
+  // 이 함수가 다른 `field` 들과 `read` 함수에 정의된 경우 항상
+  // `imutable data` 를 반환한다
+  //
+  readField<T = StoreValue>(
+    nameOrField: string | FieldNode,
+    foreignObjOrRef?: StoreObject | Reference
+  ): T;
+
+  // Returns true for non-normalized StoreObjects and non-dangling
+  // References, indicating that readField(name, objOrRef) has a chance of
+  // working. Useful for filtering out dangling references from lists.
+  //
+  // 이는 정규화되지 않은 저장객체, non-dangling 참조 일 경우 `true` 를
+  // 리턴한다.
+  // 이는 `readField` 없이 읽을수 있는 객체라는 뜻이다
+  //
+  // readField 는 `__ref` 를 사용하여 정규화된 객체를 읽어서
+  // 중첩된 객체를 반환하므로, `canRead` 로 구분하여 처리 가능하다
+  //
+  canRead(value: StoreValue): boolean;
+
+  // A handy place to put field-specific data that you want to survive
+  // across multiple read function calls. Useful for field-level caching,
+  // if your read function does any expensive work.
+  //
+  // 여러 `read` 함수 호출에서 유지하려는 필드별 데이터를 저장하는
+  // 편리한 장소이다.
+  //
+  // read 함수에서 비싼 작업을 한다면, field-level 캐싱에
+  // 유용하다
+  storage: Record<string, any>;
+
+  // Instead of just merging objects with { ...existing, ...incoming }, this
+  // helper function can be used to merge objects in a way that respects any
+  // custom merge functions defined for their fields.
+  //
+  // 단순히 { ...existsing, ...incoming} 와 병합하는 대신
+  // 자신의 필드가 정의된 custom merge function 를 고려하는 방식으로
+  // 객체 머지를 사용할수 있는 헬퍼 함수이다
+  mergeObjects<T extends StoreObject | Reference>(
+    existing: T,
+    incoming: T
+  ): T | undefined;
+}
+```
+
+> 대략적으로 알아보았지만, 실제 사용하는데 어떻게 사용할지
+> 애매하다...
+>
+> 몇몇 부분은 해석하는데 약간의 어려움이 있는것 같다...
+
+다음의 `read` 함수는 `cache` 에서 `Person` 타입의 `name` 필드가 존재하지 않는다면, `Person` 타입의 `name` 필드에 `default` 값인 `UNKNOW NAME` 을
+리턴한다.
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Person: {
+      fields: {
+        name: {
+          read(name = "UNKNOWN NAME") {
+            return name;
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+**_Handling field arguments_**
+
+만약 `field` 에 `arguments` 가 있다면, `read` 함수는 두번째 인자가 가진
+`args` 객체에 해당 `field` 의 `arguments` 의 값을 가진다
+
+예를들어서, `read` 함수의 `name` 필드에서 `maxLength` `arguments` 가 있는지 없는지 확인한다.
+
+만약 제공된다면, 함수는 `person.name` 의 `maxLength` 만큼의 문자열을
+리턴한다.
+
+그렇지 않으면 `person.name` 전체를 리턴한다
+이는 다음의 코드와 같다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Person: {
+      fields: {
+        // If a field's TypePolicy would only include a read function,
+        // you can optionally define the function like so, instead of
+        // nesting it inside an object as shown in the previous example.
+        name(name: string, { args }) {
+          if (args && typeof args.maxLength === "number") {
+            return name.substring(0, args.maxLength);
+          }
+          return name;
+        },
+      },
+    },
+  },
+});
+```
+
+만약 수많은 매개변수를 원한다면, 각 매개변수는 구조분해할당되어
+반환되는 변수로 감싸주어야 한다
+
+각 매개변수들은 개별 `subfield` 로 사용된다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Person: {
+      fields: {
+        fullName: {
+          read(
+            fullName = {
+              firstName: "UNKNOWN FIRST NAME",
+              lastName: "UNKNOWN LAST NAME",
+            }
+          ) {
+            return { ...fullName };
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+```gql
+query personWithFullName {
+  fullName {
+    firstName
+    lastName
+  }
+}
+```
+
+`field` 를 통해 `read` 함수 정의를 할수도 있다
+이것은 스키마안에 정의된 필드가 없어야한다
+
+예를 들어, 다음의 `read` 함수의 `userId` 는 `localStorage` 데이터로 채워지며 `userId` 필드로 쿼리할수 있다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Person: {
+      fields: {
+        userId() {
+          return localStorage.getItem("loggedInUserId");
+        },
+      },
+    },
+  },
+});
+```
+
+> 로컬로만 정의된 필드를 쿼리하려면, 해당 쿼리에 `@client` 지시자가
+> 포함되어야 한다. 이는 `Apollo Client` 가 `GraphQL` 서버에 요청시 이를
+> 포함하지 않도록 해준다
+
+다른 사용법들은 다음과 같다
+
+- `client` 가 필요한것들에 맞추도록 `cached` 데이터를 변경한다
+  **_예시: 부동소수점을 가까운 정수로 반올림_**
+  <br/>
+
+- 동일한 객체에 있는 하나 이상의 기존 스키마 필드에서 로컬 전용 필드를 파생시킨다
+  **_예시: `birthDate` `field` 에서 `age` `field` 를 파생시킨다_**
+  <br/>
+
+- 여러 객체에 걸쳐 하나 이상의 기존 스키마 필드에서 전용 필드를 파생
+
+> 여기서 `여러 객체에 걸쳐` 와 `하나이상의 기존 스키마 필드` 에 대한 뜻이
+> 애매모호하다.
+>
+> `여러 객체` 란 `Schema` 를 말하며, `하나이상의 기존스키마 필드` 란,
+> 스키마내부의 필드를 통해 값을 도출할수 있음을 말하는듯하다.
+
+🤼‍♂️ **_The merge function_**
+
+캐시는 `server` 로부터 응답된 값을 `field` 에 작성하려고 할때마다
+`marge` 함수를 호출한다
+
+쓰기가 발생할때, `field` 의 새로운 값은 원래 응답된 값 대신에  
+`marge` 함수가 반환한 값으로 설정된다
+
+**_Mergin arrays_**
+
+`merge` 함수는 일반적으로, `array` 를 가진 `field` 에 쓰기를 작업을
+하는것이다. 정확한건 예시를 보면 금방이해할 수 있다
+
+`merge` 함수는 다음과 같이 두 배열을 연결하는것을 볼수 있다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Agenda: {
+      fields: {
+        tasks: {
+          merge(existing = [], incoming: any[]) {
+            return [...existing, ...incoming];
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+> 이 패턴은 일반적으로 `pagenated lists` 와 함께 작업될때 효과적이다
+
+- **existing**
+  이 매개변수는 기존의 `cache` 된 데이터를 가진다
+
+> `existing` 은 주어진 `field` 의 인스턴스로부터 이 함수가 맨 처음
+> 호출되면 `undefined` 이다
+>
+> 왜냐하면 `cache` 는 아직 `field` 로부터 어떠한 데이터도 가지고 있지
+> 않기 때문이다
+>
+> 위의 예시에서 `existing = []` 을 한 이유는 효과적으로 `existing` 을
+> 제어하기 위해서 (`배열을 sperad 하려고..`)이다. 보통은 `[]` 로 `default` 값 설정하는듯 하다
+
+- **incoming**
+  이 매개변수는 응답받은 새로운 데이터를 가진다
+
+> `merge` 함수는 `incoming` 을 `existing` 배열에 직접적으로 `push` 할수
+> 없다. 잠재적인 오류를 방지하기 위해 반드시 새로운 배열을 만들어 리턴해야
+> 한다
+
+**_Merging non-normalized objects_**
+
+`merge` 함수를 중첩된 객체를 똑똑하게 결합하려고 사용한다
+이는 `cache` 에 정규화되지 않으며, 정규화된 부모안에 안에 중첩되었다고
+가정한다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Book: {
+      fields: {
+        author: {
+          // Non-normalized Author object within Book
+          merge(existing, incoming, { mergeObjects }) {
+            return mergeObjects(existing, incoming);
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+그래프 스키마에 다음의 타입이 있다고 가졍해보자
+
+```gql
+type Book {
+  id: ID!
+  title: String!
+  author: Author!
+}
+
+type Author { # Has no key fields
+  name: String!
+  dateOfBirth: String!
+}
+
+type Query {
+  favoriteBook: Book!
+}
+```
+
+이 스키마와 함께, `cache` 는 `Book` 객체는 정규화할것이다. 왜냐하면
+`Book` 은 `id` `field` 를 가지기 때문이다
+
+그러나, `Author` 객체는 `id` 필드를 가지고 있지 않으며, 특정 인스턴스의
+유일한 식별자를 가진 다른 `field` 역시 가지고 있지 않다
+
+그러므로, `cache` 는 `Author` 객체를 정규화할 수 없으며 이로인해
+두개의 다른 `Author` 객채가 실제로 같은 `author` 를 나타내는지
+알수 없다
+
+예시를 위해 `client` 는 다음의 두개의 쿼리를 순서대로 실행할것이다
+
+```gql
+query BookWithAuthorName {
+  favoriteBook {
+    id
+    author {
+      name
+    }
+  }
+}
+
+query BookWithAuthorBirthdate {
+  favoriteBook {
+    id
+    author {
+      dateOfBirth
+    }
+  }
+}
+```
+
+첫번째 쿼리는 다음의 `Book` 객체를 `cache` 에 `write` 할것이다
+
+```json
+{
+  "__typename": "Book",
+  "id": "abc123",
+  "author": {
+    "__typename": "Author",
+    "name": "George Eliot"
+  }
+}
+```
+
+> `Author` 객체는 정규화할수 없다. 이 객체는 `parent` 객체에 바로 중첩된다
+
+두번째 쿼리는 캐시된 `Book` 객체를 다음으로 업데이트 된다
+
+```json
+{
+  "__typename": "Book",
+  "id": "abc123",
+  "author": {
+    "__typename": "Author",
+    "dateOfBirth": "1819-11-22"
+  }
+}
+```
+
+⚠️ `Author` 의 `name` 필드는 제거되었다!
+
+왜냐하면 `Apollo Client` 가 두 쿼리에서 리턴된 `Author` 객체가 실제
+동일한 `author` 를 가리키는지 확신할수 없기때문이다.
+
+> 이는 다시 말하지만 `Author` 에서 식별할수 있는 고유 식별자가 없기때문이다.
+
+이때, 두 객체의 필드를 병합하는 대신, 객체를 덮어씌어버린다
+
+> 이러한 경우 `Warning` 로그가 출려된다
+
+그러나 두 `author` 는 같은 `author` 를 나타낸다. 왜냐하면 책의 저자는
+거의 변하지 않기 때문이다.
+
+그러므로 `Book.author` 가 같은 `Book` 에 속해
+있는한 같은 객체임을 `cache` 에 지시할수 있다
+
+이를통해 `cache` 는 다른 쿼리에 의해 반환된 `name` 과 `dateOfBirth` 필드를
+`marge` 할수 있다
+
+이를 위해서 `Book` 에서 `policy type` 안 `author` 필드에
+커스텀 `merge` 함수를 정의한다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Book: {
+      fields: {
+        author: {
+          merge(existing, incoming, { mergeObjects }) {
+            return mergeObjects(existing, incoming);
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+`mergeObjects` 라는 헬퍼 함수를 사용했다. 이 함수는 `Author` 객체의
+`esisting`, `incoming` 의 값을 병합한다
+
+`merge` 를 위해 `Object spread syntax` 를 사용하는 대신 `mergeObject` 를
+사용한다는것은 매우 중요하다. 왜냐하면 `mergeObjects` 는 `Book.author` 의
+서브필드에 대해 정의된 `merge` 함수를 모두 호출하기 때문이다
+
+이 `merge` 함수는 `Book` 또는 `Author` 에대해 정의된 로직이 전혀없음을
+눈치 챘을것이다. 이는 어떠한 비 정규화된 객체 필드에도 재사용가능함을
+말한다. 실제로 이를 이용해 `merge` 라는 단축어로도 정의가능하다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Book: {
+      fields: {
+        author: {
+          // Equivalent to options.mergeObjects(existing, incoming).
+          merge: true,
+        },
+      },
+    },
+  },
+});
+```
+
+두개의 비정규화된 객체를 `merge` 하려면 다음의 두가지가 반드시
+조건 이어야 한다
+
+- 두 객체는 반드시 `cache` 에서 정확히 동일한 정규화된 객체의 적확히
+  동일한 `field` 이어야 한다
+
+- 두 객체는 반드시 같은 `__typename` 이어야 한다
+
+> 이는 여러 `object type` 들중 하나를 반환할수 있는 `interface` 및 `union` 반환타입이 있는 `field` 에 중요하다.
+
+**_Merging array of non-normalized objects_**
+
+`Book` 이 여러 `authors` 를 가진다면 어떻게 되는지 생각해보자
+
+```gql
+query BookWithAuthorNames {
+  favoriteBook {
+    isbn
+    title
+    authors {
+      name
+    }
+  }
+}
+
+query BookWithAuthorLanguages {
+  favoriteBook {
+    isbn
+    title
+    authors {
+      language
+    }
+  }
+}
+```
+
+`favoriteBooks.authors` 필드는 비정규화된 `Author` 객체의 리스트를 가진다
+이 경우 `name` 그리고 `language` 필드를 확인하는 좀더 복잡한 `merge` 함수를 정의할 필요가 있다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Book: {
+      fields: {
+        authors: {
+          merge(existing: any[], incoming: any[], { readField, mergeObjects }) {
+            // existing 이 존재하면 existing 을 복사한 배열을
+            // 아니면 빈배열을 할당
+            // 이는 나중에 병합된 배열을 리턴하는데 사용된다
+            const merged: any[] = existing ? existing.slice(0) : [];
+
+            //  __proto__ 가 없는 빈객체 생성
+            // 이는 readField('name', author) 값을 가진 key 와
+            // existing 배열의 각 요소에 대한 index 를 value 로
+            // 가진 객체이다
+            const authorNameToIndex: Record<string, number> =
+              Object.create(null);
+
+            // existing 이 있다면
+            if (existing) {
+              // existing 의 값을 가져와서 `authorNameToIndex` 에 할당
+              existing.forEach((author, index) => {
+                // authorNameToIndex 의 key 는 readField 헬퍼함수의 반환값
+                // 이며 값은 `index` 이다
+                //
+                // author.name 을 사용하지 않고 readField 를 사용하는 이유는
+                // normalized 된 field 때문이다.
+                // 정규화 될때, 중첩된 객체는 `__ref` 로 객체의 unique id 를
+                // 가진다.
+                //
+                // cache 에서 정규화된 field 를 가져온다면 이 값은
+                // 중첩된 객체가 아닌 `__ref: ID` 형태를 띈 값일것이다.
+                // 이러한 객체참조 `ID` 를 다시 non_normalized 시켜서,
+                // 중첩객체로 만들어야 한다.
+                // (deserialize 처럼 생각해도 될듯하다)
+                //
+                // 이를 위해 Apollo Client 에서 cache 된 데이터를 가져올때
+                // 항상 readField 를 사용하는것이 좋다
+                // (해당값이 정규화된 객체일수 있으니...)
+                authorNameToIndex[readField<string>("name", author)] = index;
+              });
+            }
+            // incomming 의 값을 가져온다
+            incoming.forEach((author) => {
+              // authorNameToIndex 에서 가져올 key 값
+              const name = readField<string>("name", author);
+              // name 을 사용하여 aurthorNameToIndex 에
+              // 해당하는 index 값을 가져온다
+              const index = authorNameToIndex[name];
+              // index 타입이 number 라면
+              if (typeof index === "number") {
+                // Merge the new author data with the existing author data.
+                // merged 배열 `index` 에 merged[index] 에 저장된 값과
+                // 현재 author 를 병합
+                merged[index] = mergeObjects(merged[index], author);
+              } else {
+                // index 가 number 가 아니라면, (아마도 undefined 일것이다)
+                // 이 경우는 맨 처음 호출될때, 혹은 빈배열 일때이다
+                // First time we've seen this author in this array.
+                // authorNameToIndex[name] 을 merged.length 값으로 지정한다
+                // 1. authorNameToIndex[name] = 0
+                // 2. authorNameToIndex[name] = 1
+                // ...
+                //
+                // 사실 이 값은 이부분에서 필요없을거 같은데..
+                // 일단 둔다..
+                authorNameToIndex[name] = merged.length;
+                // author 를 merged 에 추가한다
+                merged.push(author);
+              }
+            });
+            // 만들어진 merged 를 반환한다
+            return merged;
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+이는 매우 복잡하므로, `helper` 함수로 따로 빼서 적용가능하다
+
+```ts
+function mergeArrayByField<T>(fieldName: string): MergeFunction<T> {
+  return (existing, incoming, { readField, mergeObjects }) => {
+    const merged: T[] = existing ? existing.slice(0) : [];
+    const fieldToIndex: Record<string, number> = Object.create(null);
+
+    if (existing) {
+      existing.forEach((item, index) => {
+        const fieldValue = readField(fieldName, item);
+        fieldToIndex[fieldValue] = index;
+      });
+    }
+
+    incoming.forEach((item) => {
+      const fieldValue = readField(fieldName, item);
+      const index = fieldToIndex[fieldValue];
+
+      if (typeof index === "number") {
+        merged[index] = mergeObjects(merged[index], item);
+      } else {
+        fieldToIndex[fieldValue] = merged.length;
+        merged.push(item);
+      }
+    });
+
+    return merged;
+  };
+}
+
+const cache = new InMemoryCache({
+  typePolicies: {
+    Book: {
+      fields: {
+        authors: {
+          merge: mergeArrayByField<AuthorType>("name"),
+        },
+      },
+    },
+  },
+});
+```
+
+이를 통해 단순화 시킬수 있다.
+
+🔝 **_Defining a merge function at the top level_**
+
+`Apollo Client 3.3` 에서 비정규화된 `Object Type` 를 위한 `default merge` 함수를
+정의할수 있다
+
+그렇게 하면, 해당 `type` 을 반환하는 모든 `field` 는 `field` 별로 재정의 되지 않는한
+`default merge` 함수를 사용한다
+
+이는 다음과 같다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Book: {
+      fields: {
+        // No longer required!
+        // author: {
+        //   merge: true,
+        // },
+      },
+    },
+
+    Author: {
+      merge: true,
+    },
+  },
+});
+```
+
+이는 더이상 `field-level merge function` 을 사용할 필요 없이 `field` 에 적용가능하다
+매우 편리하게 사용가능할듯 보인다
+
+📖 **_handling pagination_**
+
+`field` 가 `array` 로 고정될때, `array` 로 반환되는 결과인 `pageinate` 에
+유용하게 사용된다
+
+이는 임의의 큰 배열을 가진 전체 결과를 반환하기에 때문이다
+
+일반적으로, `pagenation query` 는 다음의 `pagination arguments` 를 포함해야 한다
+
+- `array` 의 시작이 어디인지, `offset` 또는 `startingID` 를 사용한다
+  <br/>
+
+- `현재 페이지` 에서 반환되는 최대 `elements` 수
+
+만약 `field` 에서 `pagination` 을 구현한다면, `field` 에서 `read` 그리고
+`merge` 함수를 구현시 `pagenamtion arguments` 를 명심해야 한다
+
+```ts
+const agendaTasksMergePagenation: FieldMergeFunction = <T extends {}>() =>
+function read(existing: T[], incomming: T[], { args }: ): FieldMergeFunction {
+  // args.offset = array list 의 offset 개수
+  // args.limit = array list 의 limit 개수
+  const { offset, limit } = args;
+
+  // 기존의 tasks 배열을 복사 없으면 빈배열
+  const merged = existing ? existing.slice(0) : [];
+
+  // offset 에서 limit 결과를 더해야 가져올 개수의 끝을 알수있다
+  // inclomming.length 값이 limit 보다 작으면 해당 개수를 사용한다
+  const end = offset + Math.min(limit, incomming.length);
+
+  // offset 부터 end 까지 반복
+  for (let i = offset; i < end; i+=1) {
+    // merged 배열에서 해당 index 는 offset 에서 end 이며
+    // incomming 배열의 원소를 하나씩 할당한다
+    //
+    // incomming 배열은 0 부터 시작하니 i - offset 을 해서
+    // 인덱스 값을 할당한다
+    merged[i] = incomming[i - offset];
+  }
+  // merged 를 반환
+  return merged;
+}
+
+const agendaTasksReadPagenation: FieldReadFunction = <T extends {}>() =>
+function read(existing: T[], { args }) {
+  // offset, limit 을 가져옴
+  const { offset, limit } = args;
+
+  // existing 이 존재하면, slice 를 사용하여
+  // offset 에서부터 offset + limit 까지 자른다
+  const page = existing && existing.slice(
+    offset,
+    offset + limit,
+  );
+
+  // page 가 존재하고 length 가 0 보다크면
+  if (page && page.length > 0) {
+    // page 리턴
+    return page;
+  }
+}
+
+const cache = new InMemoryCache ({
+  typePolices: {
+    Agenda: {
+      fields: {
+        tasks: {
+          agendaTasksMergePagenation<Tasks>(),
+          agendaTasksReadPagenation<Tasks>(),
+        }
+      }
+    }
+  }
+})
+
+```
+
+위의 예시는 `read` 함수와 `merge` 함수가 같은 `aguments` 서로 협력하는것을 볼 수 있다
+
+다음은 `args.offset` 대신에 지정한 `entity ID` 를 지정하여 페이지의 `start`
+지점을 줄수 있다
+
+이때에도 `merge` 그리고 `read` 함수를 같이 구현한다
+
+```ts
+
+const AgendaTasksMergePagenation: FieldMergeFunction = <T extends {}>() =>
+function merge(existing: T[], incoming: T[], { args, readField }) {
+  // existing 배열이 있다면 existing 배열 복사 아니면 빈배열 생성
+  const merged = exsisting ? exsiting.slice(0) : [];
+
+  // 모든 `taskId` 의 `set` 을 얻는다
+  const existingIdSet = new Set(
+    // 여기서 `readField` 를 사용하여 실제 필드값을 가져온다
+    // 그리고 반환된 배열을 Set 에 담는다.
+    // Set 을 사용하는 이유는 읽기 전용이며, 고유한 ID 를 가진
+    // 값이니, Set 으로 작성한듯하다
+    mreged.map(task => readField('id', task));
+  );
+
+  // incoming 에서 existingIdSet 의 id 를 가진 필드가 있다면
+  // 제거한다
+  incoming = incoming.filter(
+    task => !existingIdSet.has(readField('id', task))
+  );
+
+  // incoming tasks 이전의 id 값을 찾는다
+  const afterIndex = merged.findIndex(
+    task => args.id === readField('id', task);
+  );
+
+  // afterIndex 가 -1 이 아니면
+  if (afterIndex >= 0) {
+    // merged 에 afterIndex + 1 의 index 이후에 ...incoming 배열원소들을 할당
+    merged.splice(afterIndex + 1, 0, ...incoming);
+  } else {
+    // -1 이면, 저장된 cache 가 없다는것이므로, merged 에 incoming push
+    merged.push(...incoming);
+  }
+  // merged 반환
+  return merged;
+}
+
+const AgendaTasksReadPagenation = <T extends {}>() =>
+function read(existing: T[], { args, readField }) {
+  // exisiting 이 있다면
+  if (existing) {
+    // exisging 에서 다음 페이지네이션 id 이전값을 찾는다
+    const afterIndex = existing.findIndex(
+      task => args.afterId === readField('id', task);
+    );
+    // -1 이 아니라면
+    if (afterIndex >= 0) {
+      // afterIndex + 1 부터 afterIndex + 1 + args.limit 까지 잘라
+      // page 에 할당
+      const page = existing.slice(
+        afterIndex + 1,
+        afterIndex + 1 + args.limit
+      );
+      // 만약 page 가 있고 length 가 0 보다 크면
+      if (page && page.length > 0) {
+        // page 리턴
+        return page;
+      }
+    }
+  }
+}
+
+const cache = new InMemoryCache({
+  typePolices: {
+    Agenda: {
+      fields: {
+        tasks: {
+          AgendaTasksMergePagenation<Task>(),
+          AgendaTasksReadPagenation<Task>(),
+        }
+      }
+    }
+  }
+})
+
+```
+
+이를 통해 간편하게 처리가능하도록 만들수있다.
+그런데, 더 간편하게 만드네??...
+
+```ts
+function afterIdLimitPaginatedFieldPolicy<T>() {
+  return {
+    merge(existing: T[], incoming: T[], { args, readField }): T[] {
+      ...
+    },
+    read(existing: T[], { args, readField }): T[] {
+      ...
+    },
+  };
+}
+
+const cache = new InMemoryCache({
+  typePolicies: {
+    Agenda: {
+      fields: {
+        tasks: afterIdLimitPaginatedFieldPolicy<Reference>(),
+      },
+    },
+  },
+});
+```
+
+이게 맞지.. 👍 `Docs` 가 역시 좋다
+
+**_Specifying key arguments_**
+
+만약 `field` 가 `arguments` 를 받는다면, `FieldPolicy` `field` 에 `KeyArgs` 의
+배열을 지정할수 있다.
+
+이 `arguments` 를 가리키는 배열은 `key arguments` 라 부른며
+`key arguments` 는 `field` 의 값에 영향을 미친다
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Query: {
+      fields: {
+        monthForNumber: {
+          keyArgs: ["number"],
+        },
+      },
+    },
+  },
+});
+```
+
+위는 `arguments` 로 `number` 을 배열로 넣는다.
+이는 `monthForNumber` 필드의 `cache` 키가 이름이 `number` 인 인수를 기반으로
+생성되야 함을 말한다
+
+> 🐵 갑자기 내용이 헷갈린다. 내용을 정리해보자
+>
+> 모든 `Object` 는 `__ref` 를 통해 정규화 된다고 했다
+>
+> 정규화되어 `flat` 한 `Object` 를 생성하는데, 이때 해당 스키마의 `Object` 들은
+> `__ref` 에서 참조가능한 식별자역할을 하는 `cache ID` 를 생성한다
+>
+> 이 생성된 `cache ID` 값이 `cache` 키이고, 이 키를 가진 객체는 `number` 라는
+> 인수를 가졌다고 알려주는것이다.
+>
+> 여기서 중요한건 `field` 가 이러한 `KeyArgs` 에 지정한 인수를 받아,
+> 해당 인수의 값에 따른 새로운 `cache ID` 를 생성한다는 것이다.
+>
+> 간단히 말하면 `field` 가 `arg` 에 따라서 다른 `cacheId` 를 가진 데이터가 저장된다.
+>
+> `cache` 상에서 이 `field` 에서 `arg` 의 값으로 `1` 이 저장되어 있다면,
+> `1` 의 `arg` 로 해당 `field` 으로 조회할때 캐시된 데이터를 찾아서 반환한다.
+>
+> 반면 `2` 값으로 쿼리를 한다면, `2` 값은 없으므로, `2` 에 대한
+> `cacheId` 를 생성하여 `cache` 한다
+>
+> 이는 인수를 기반으로 캐시를 효율적으로 구성하는것이다
+>
+> 음... 정리하니 어떠한 방식인지 추상적으로 그려진다.
+
+**기본적으로 `field` 의 모든 `arguments` 는 전부 `key arguments` 이다**
+그러므로, `field` 에서 받은 모든 이자값에 따라 새로운 `cacheID` 가 생성되며
+`cache` 됨을 의미한다
+
+위 예시처럼 `field` 에 `KeyArgs` 를 지정하면, 지정된 인수가 아닌 나머지 인수들은
+`key arguments` 가 아님을 의미한다
+
+이는 다음과 같은 상황이 발생할수 있다
+
+만약, `monthForNumber` 를 쿼리하는 두개의 쿼리가 있는데,
+두 쿼리상에 `number` 인자값은 같지만 `token` 인자값은 서로 다른 값을 가지고 있다고 하자
+
+이러한경우 `KeyArgs` 는 오직 `number` 인자만을 `key arguments` 로 사용하기 때문에,
+두번째 쿼리되는 값이 첫번째 쿼리 값으로 덮어씌어버린다
+
+이는 예상치 못한 결과가 발생할수 있음으로 잘 생각하고 작성해야 할것같다
+
+**_Providing a KeyArgs function_**
+
+`KeyArgs` 를 좀더 설정가능하도록 배열로 구성하는게 아닌 함수로써 사용가능하게 만들었다
+이 `KeyArgs` 함수는 다음의 2개의 인자값을 갖는다
+
+- `args` 객체는 모든 `field` 의 모든 `arguments` 를 포함한다
+  <br/>
+
+- `context` 객체는 기타관련 세부정보를 포함하는 객체이다.
+  <br/>
+
+현재까지 `CachePolicy` 에 대한 대략적인 내용을 정리했다
+이제 직접 구현해볼 차례이다.
+
+---
+
+앞에서 살펴보았듯, `chech` 스토어는 정규화된 객체를 갖는다.
+이러한 정규화된 객체는 `cacheId` 를 갖으며, 이 `cacheId` 가
+`cache` 스토어에서 해당 쿼리를 찾을수 있는 식별자가 된다.
+
+> `cacheId` 는 `ID`, `__typename` 이며, 이 `cachId` 와 받은 인수인
+> `arguments key` 로 캐시를 조회한다
+
+그럼 앞전의 코드에서 왜 `fetchMore` 가 `data` 에 적용이 안되었는지 이해할수
+있다
+
+`fetchMore` 할때, `cache` 스토어에 해당하는 쿼리의 캐시를 찾을 수 없어
+`graphQL server` 에서 `data` 를 `fetch` 하고, `fetch` 된 `data` 에 대한 새로운
+캐시를 생성하여 저장할 것이다.
+
+`fetchMore` 의 역할은 딱 여기까지이다.
+
+> 이는 앞전의 `fetch` 된 쿼리의 데이터와 다르기 때문이다.
+> 다시 말하지만 `cacheId` 와 `arguments key` 로 캐시를 조회한다
+> `fetchMore` 에서 `arguments key` 값이 다르기 때문에 캐시된데이터가 없다
+
+이제, 이를 해결하기위해 `PolicyType` 을 구현한다
+
+```ts
+import { FieldMergeFunction, FieldReadFunction } from '@apollo/client';
+import { PagenatedFilms } from '../../generated/graphql';
+import { KeyArgsFunction, KeySpecifier } from '@apollo/client/cache/inmemory/policies';
+
+// FieldPolicyObj 인터페이스는 FieldMergeFunction 과 FieldReadFunction
+// 타입을 가진 객체이다
+interface FieldPolicyObj {
+  keyArgs: KeySpecifier | KeyArgsFunction | false;
+  merge?: FieldMergeFunction;
+  read?: FieldReadFunction;
+}
+
+// PagenatedFilms 타입을 제네릭으로 받는 함수
+export const filmsPagenatedFieldPolicy = <T extends PagenatedFilms>(): FieldPolicyObj => {
+  return {
+    // 페이지 네이션은
+    // 특정 필드로 따로 캐시되어 저장될 필요가 없다
+    keyArgs: false,
+    // TypePolicy 에서 사용할 merge 함수
+    merge(existing: T | undefined, incoming: T) {
+      console.log(existing, incoming)
+      return {
+        cursor: incoming.cursor, // 다음 cursor
+        films: existing ? [...existing.films, ...incoming.films] : incoming.films, // films 배열
+      };
+    },
+  };
+};
+```
+
+이를 생성한후 적용한다
+
+`./ghibli_project/web/src/App.tsx`
+
+```tsx
+import { ChakraProvider, Box, Text, theme } from '@chakra-ui/react';
+import { ApolloClient, ApolloProvider, InMemoryCache } from '@apollo/client';
+import FilmList from './components/film/FilmList';
+import { filmsPagenatedFieldPolicy } from './common/apollo/FieldPolicy'
+
+const apolloClient = new ApolloClient({
+  // graphql server uri
+  uri: 'http://127.0.0.1:8000/graphql',
+  // apollo client 캐시를 메모리에 캐시
+  cache: new InMemoryCache({
+    typePolicies: {
+      Query: {
+        fields: {
+          films: filmsPagenatedFieldPolicy(),
+        }
+      }
+    }
+  }),
+});
+
+export const App = () => (
+  <ApolloProvider client={apolloClient}>
+    <ChakraProvider theme={theme}>
+      <Box>
+        <Text>Ghibli GraphQL</Text>
+      </Box>
+      <FilmList />
+    </ChakraProvider>
+  </ApolloProvider>
+);
+```
+
+이후, `FilmList` 를 수정한다
+
+`ghibli_project/web/src/components/film/FilmList.tsx`
+
+```tsx
+import { Box, SimpleGrid, Skeleton } from '@chakra-ui/react';
+import useFilmsQuery from '../../hooks/queries/useFilmsQuery';
+import FilmCard from './FilmCard';
+import Scroller from '../common/scroller';
+import { useCallback } from 'react';
+
+export default function FilmList() {
+  // 패칭할 데이터 LIMIT 
+  const LIMIT = 6;
+  // films 쿼리
+  const { data, loading, error, fetchMore } = useFilmsQuery({
+    cursor: 1,
+    limit: LIMIT,
+  });
+
+  // Scroller 의 onEnter 함수 
+  const onEnter = useCallback(() => {
+    if (data) {
+      // fetchMore 실행
+      fetchMore({
+        variables: {
+          limit: LIMIT,
+          cursor: data.films.cursor,
+        },
+      });
+    }
+  }, [data, fetchMore]);
+
+  if (loading) return <p>...loading</p>;
+  if (error) return <p>{error.message}</p>;
+
+  return (
+    <Scroller onEnter={onEnter} isLoading={loading} lastCursor={data?.films.cursor}>
+      <SimpleGrid columns={[2, null, 3]} spacing={[2, null, 10]}>
+        {loading && new Array(LIMIT).fill(0).map((x) => <Skeleton key={x} height="400px" />)}
+        {!loading &&
+          data &&
+          data.films.films.map((film) => (
+            <Box key={film.id}>
+              <FilmCard film={film} />
+            </Box>
+          ))}
+      </SimpleGrid>
+    </Scroller>
+  );
+}
+
+```
+
+제대로 `Scroller` 가 작동하는것을 볼 수 있다.
+
+이후에 `react-route-dom` 을 사용하는데, `v6` 를 사용하여 적용한다
+
+🦊 여기 내용은 그냥저냥해서 넘긴다
+
+## 🎥 Lazy-loading
+
+> 책에서는 `react-lazyloading` 을 사용한다.
+> `InterceptionObserver` 를 통해 직접구현한다
+
+일단 `lazyLoading` 에 대해서 생각해보자.
+`Film` 페이지로 진입시 모든 이미지가 한꺼번에 로드된다
+
+이는 보이지 않은 모든 이미지전부를 가져오므로, 서버입장에서나 클라이언트 입장에서
+좋지 못하다
+
+> 클라이언트에서는 서버에서 많은 양의 사진을 불러와서 렌더링해야 하므로 좋지 못하고,
+서버 입장에서는 사용자에게 보여주지 않아도되는 사진을 보내야 하므로, 퍼포먼스상 좋지않다
+
+간단한 `LazyLoader` 를 구현해본다
+
+`ghibli_project/web/src/components/common/LazyLoader.tsx
+
+```tsx
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Skeleton from './Skeleton/Skeleton';
+
+interface LazyLoaderProps {
+  children: React.ReactElement;
+  height?: number;
+  loading: boolean;
+}
+
+const LazyLoader = ({ children, height, loading }: LazyLoaderProps) => {
+  // 해당 element 를 보여줄지 설정하는 state
+  const [inView, setInView] = useState<boolean>(false);
+  // interceptionObserver target ref
+  const ioPlaceholderRef = useRef<HTMLImageElement>(null);
+  // interceptionObserver ref
+  const ioRef = useRef<IntersectionObserver>();
+  // interceptionObserver 콜백
+  const lazyLoading: IntersectionObserverCallback = useCallback(
+    (entities, obs) => {
+      entities.forEach((entity) => {
+        // entity 가 intersecting 되었다면,
+        if (entity.isIntersecting) {
+          // setInview 를 true
+          setInView(true);
+          // obs.discnnect 한다
+          // 이는 한번 실행한후에 다시 실행되지 않도록 하기 위해서다
+          obs.disconnect();
+        }
+      });
+    },
+    [setInView],
+  );
+
+  useEffect(() => {
+    // ioRef 할당
+    ioRef.current = new IntersectionObserver(lazyLoading, {
+      threshold: 0
+    });
+    // ioPlaceholderRef 가 있다면
+    if (ioPlaceholderRef.current) {
+      // loading 중이면 unobserve
+      if (loading) {
+        ioRef.current.unobserve(ioPlaceholderRef.current);
+      } else {
+        // intersectionObserver 생성
+        // 타겟설정
+        ioRef.current.observe(ioPlaceholderRef.current);
+      }
+    }
+    // unmount 시 disconnect
+    return () => {
+      if (ioRef.current) {
+        ioRef.current.disconnect();
+      }
+    };
+  }, [ioRef, lazyLoading, ioPlaceholderRef, loading]);
+
+  return (
+    <>
+      {inView && !loading ? (
+        children
+      ) : (
+        <Skeleton ref={ioPlaceholderRef} animationEffect={true} height={height} rounded={40} />
+      )}
+    </>
+  );
+};
+
+export default LazyLoader;
+
+```
